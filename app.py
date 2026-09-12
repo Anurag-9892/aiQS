@@ -453,3 +453,11 @@ with tab_docs:
                 if c.chunk_id == selected_chunk:
                     st.text_area("Content", c.text, height=180, disabled=True)
                     st.caption(f"File: {c.source_file} | Page: {c.page_number}")
+
+# Vercel ASGI Serverless export
+try:
+    from api.index import app as handler
+    app = handler
+except Exception:
+    pass
+

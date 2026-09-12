@@ -1,0 +1,427 @@
+"""
+Vercel Serverless Entrypoint for aiQS.
+FastAPI app exposing both API endpoints and the clean monochrome web dashboard.
+"""
+
+import os
+import sys
+from io import BytesIO
+from typing import List, Optional
+
+# Ensure root directory is in sys.path so modules can be imported
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from document_loader import load_document, chunk_document_pages
+from rag_engine import RAGEngine, DEFAULT_LLM_MODEL
+
+app = FastAPI(title="aiQS API", version="1.0.0")
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Global in-memory RAG engine instance
+rag_engine = RAGEngine()
+
+
+class QueryRequest(BaseModel):
+    question: str
+    api_key: Optional[str] = None
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "configured": rag_engine.is_configured()}
+
+
+@app.get("/api/stats")
+def get_stats():
+    return rag_engine.get_stats()
+
+
+@app.post("/api/load-sample")
+def load_sample(api_key: Optional[str] = Form(None)):
+    if api_key and api_key.strip():
+        rag_engine.set_api_key(api_key.strip())
+
+    sample_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "sample_documents",
+        "MCA_Semester_1_Syllabus.txt"
+    )
+    if not os.path.exists(sample_path):
+        raise HTTPException(status_code=404, detail="Sample syllabus not found")
+
+    pages = load_document(sample_path, "MCA_Semester_1_Syllabus.txt")
+    chunks = chunk_document_pages(pages, chunk_size=700, chunk_overlap=150)
+    count = rag_engine.index_chunks(chunks)
+    return {"status": "success", "indexed_chunks": count, "file": "MCA_Semester_1_Syllabus.txt"}
+
+
+@app.post("/api/upload")
+async def upload_documents(
+    files: List[UploadFile] = File(...),
+    api_key: Optional[str] = Form(None)
+):
+    if api_key and api_key.strip():
+        rag_engine.set_api_key(api_key.strip())
+
+    all_chunks = []
+    processed_files = []
+
+    for file in files:
+        contents = await file.read()
+        file_bytes = BytesIO(contents)
+        pages = load_document(file_bytes, file.filename)
+        chunks = chunk_document_pages(pages, chunk_size=700, chunk_overlap=150)
+        all_chunks.extend(chunks)
+        processed_files.append({"filename": file.filename, "pages": len(pages), "chunks": len(chunks)})
+
+    if all_chunks:
+        count = rag_engine.index_chunks(all_chunks)
+        return {"status": "success", "indexed_chunks": count, "files": processed_files}
+
+    return {"status": "no_text", "detail": "No readable text found in uploaded files."}
+
+
+@app.post("/api/query")
+def query_documents(req: QueryRequest):
+    if req.api_key and req.api_key.strip():
+        rag_engine.set_api_key(req.api_key.strip())
+
+    if not rag_engine.is_configured():
+        raise HTTPException(status_code=400, detail="Gemini API Key is not configured.")
+
+    if not rag_engine.vector_store.chunks:
+        raise HTTPException(status_code=400, detail="No documents are currently indexed.")
+
+    # Retrieve top-4 chunks
+    retrieved = rag_engine.retrieve_context(req.question, top_k=4)
+
+    # Generate answer
+    stream = rag_engine.generate_grounded_response_stream(
+        question=req.question,
+        retrieved_chunks=retrieved,
+        model_name=DEFAULT_LLM_MODEL
+    )
+    answer = "".join(list(stream))
+
+    citations = []
+    for chunk, score in retrieved:
+        citations.append({
+            "source_file": chunk.source_file,
+            "page_number": chunk.page_number,
+            "score": round(score, 2),
+            "match_percent": int(score * 100),
+            "text": chunk.text
+        })
+
+    return {
+        "question": req.question,
+        "answer": answer,
+        "citations": citations
+    }
+
+
+@app.post("/api/clear")
+def clear_index():
+    rag_engine.clear_index()
+    return {"status": "cleared"}
+
+
+@app.get("/", response_class=HTMLResponse)
+def serve_dashboard():
+    """Serve the clean monochrome dashboard."""
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>aiQS — Document Question Answering</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+        body { background: #FFFFFF; color: #111111; display: flex; height: 100vh; overflow: hidden; }
+        
+        /* Sidebar */
+        aside { width: 320px; border-right: 1px solid #E5E5E5; padding: 24px; display: flex; flex-direction: column; gap: 20px; background: #FAFAFA; }
+        .side-title { font-size: 1.1rem; font-weight: 700; color: #000000; }
+        .input-box { width: 100%; padding: 10px 12px; border: 1px solid #E5E5E5; border-radius: 6px; font-size: 0.85rem; background: #FFFFFF; }
+        .input-box:focus { outline: none; border-color: #000000; }
+        .dropzone { border: 2px dashed #D4D4D4; border-radius: 8px; padding: 24px 16px; text-align: center; background: #FFFFFF; cursor: pointer; }
+        .btn { padding: 10px 14px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; border: 1px solid #000000; transition: all 0.15s; }
+        .btn-primary { background: #000000; color: #FFFFFF; }
+        .btn-primary:hover { background: #262626; }
+        .btn-secondary { background: #FFFFFF; color: #111111; border-color: #E5E5E5; }
+        .btn-secondary:hover { background: #F5F5F5; }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+        /* Main Workspace */
+        main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        header { padding: 20px 32px; border-bottom: 1px solid #E5E5E5; display: flex; justify-content: space-between; align-items: center; }
+        .header-title { font-size: 1.4rem; font-weight: 700; letter-spacing: -0.3px; }
+        .header-sub { font-size: 0.85rem; color: #666666; margin-top: 2px; }
+        .status-badge { font-size: 0.78rem; font-weight: 600; background: #F5F5F5; border: 1px solid #E5E5E5; padding: 4px 10px; border-radius: 6px; }
+
+        /* Metrics */
+        .metrics-bar { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; padding: 16px 32px 0 32px; }
+        .metric-card { border: 1px solid #E5E5E5; border-radius: 8px; padding: 14px 16px; background: #FFFFFF; }
+        .metric-label { font-size: 0.75rem; font-weight: 600; color: #737373; text-transform: uppercase; }
+        .metric-val { font-size: 1.35rem; font-weight: 700; margin-top: 2px; }
+
+        /* Chat Container */
+        .chat-container { flex: 1; overflow-y: auto; padding: 24px 32px; display: flex; flex-direction: column; gap: 16px; }
+        .message { display: flex; flex-direction: column; max-width: 85%; }
+        .message.user { align-self: flex-end; }
+        .message.assistant { align-self: flex-start; }
+        .bubble { padding: 12px 16px; border-radius: 8px; font-size: 0.92rem; line-height: 1.55; }
+        .message.user .bubble { background: #000000; color: #FFFFFF; }
+        .message.assistant .bubble { background: #F5F5F5; color: #111111; border: 1px solid #E5E5E5; }
+        
+        /* Citations */
+        .citations { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+        .citation-box { background: #FAFAFA; border: 1px solid #E5E5E5; border-left: 3px solid #000000; border-radius: 6px; padding: 10px 12px; font-size: 0.82rem; }
+        .citation-tags { display: flex; gap: 6px; margin-bottom: 4px; font-size: 0.72rem; font-weight: 600; }
+        .tag-mono { background: #E5E5E5; padding: 2px 6px; border-radius: 4px; }
+        .tag-border { border: 1px solid #E5E5E5; background: #FFFFFF; padding: 2px 6px; border-radius: 4px; }
+
+        /* Prompt Suggestions */
+        .suggestions { display: flex; gap: 8px; margin-bottom: 12px; overflow-x: auto; }
+        .chip { background: #FFFFFF; border: 1px solid #E5E5E5; border-radius: 6px; padding: 6px 12px; font-size: 0.8rem; cursor: pointer; white-space: nowrap; }
+        .chip:hover { background: #F5F5F5; border-color: #000000; }
+
+        /* Chat Input Bar */
+        .chat-footer { padding: 16px 32px; border-top: 1px solid #E5E5E5; background: #FFFFFF; }
+        .input-row { display: flex; gap: 10px; }
+        .chat-input { flex: 1; padding: 12px 14px; border: 1px solid #E5E5E5; border-radius: 6px; font-size: 0.9rem; }
+        .chat-input:focus { outline: none; border-color: #000000; }
+    </style>
+</head>
+<body>
+    <aside>
+        <div class="side-title">Document Manager</div>
+        <div>
+            <label style="font-size: 0.75rem; font-weight: 600; color: #737373; display: block; margin-bottom: 6px;">GEMINI API KEY</label>
+            <input type="password" id="apiKey" class="input-box" placeholder="Enter API Key...">
+        </div>
+        <div>
+            <label style="font-size: 0.75rem; font-weight: 600; color: #737373; display: block; margin-bottom: 6px;">UPLOAD DOCUMENTS</label>
+            <input type="file" id="fileInput" multiple style="display:none;" onchange="handleFileSelected(this)">
+            <div class="dropzone" onclick="document.getElementById('fileInput').click()">
+                <div style="font-size: 1.5rem; margin-bottom: 4px;">📄</div>
+                <div style="font-size: 0.82rem; font-weight: 600;">Click to select files</div>
+                <div style="font-size: 0.72rem; color: #737373; margin-top: 2px;">PDF, DOCX, TXT</div>
+            </div>
+            <div id="fileList" style="font-size: 0.75rem; color: #666666; margin-top: 6px;"></div>
+        </div>
+        <div class="btn-group">
+            <button class="btn btn-primary" onclick="indexFiles()">Index Files</button>
+            <button class="btn btn-secondary" onclick="loadSample()">Sample</button>
+        </div>
+        <div style="margin-top: auto;">
+            <button class="btn btn-secondary" style="width: 100%; font-size: 0.78rem;" onclick="clearDocs()">Clear Documents</button>
+        </div>
+    </aside>
+
+    <main>
+        <header>
+            <div>
+                <h1 class="header-title">Document Question Answering</h1>
+                <div class="header-sub">Grounded answers synthesized strictly from your uploaded files.</div>
+            </div>
+            <div class="status-badge" id="statusBadge">Status: Ready</div>
+        </header>
+
+        <div class="metrics-bar">
+            <div class="metric-card">
+                <div class="metric-label">Active Documents</div>
+                <div class="metric-val" id="docCount">0</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Knowledge Chunks</div>
+                <div class="metric-val" id="chunkCount">0</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Retrieval</div>
+                <div class="metric-val">Cosine Top-4</div>
+            </div>
+        </div>
+
+        <div class="chat-container" id="chatContainer">
+            <div class="message assistant">
+                <div class="bubble">
+                    Upload your documents or click <strong>Sample</strong> in the sidebar to begin asking questions.
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-footer">
+            <div class="suggestions">
+                <div class="chip" onclick="askSuggestion('What are the subjects in Semester 1?')">Subjects in Semester 1?</div>
+                <div class="chip" onclick="askSuggestion('Explain the topics covered in Unit 3 in detail.')">Topics in Unit 3?</div>
+                <div class="chip" onclick="askSuggestion('What is the examination evaluation scheme?')">Examination scheme?</div>
+            </div>
+            <div class="input-row">
+                <input type="text" id="userInput" class="chat-input" placeholder="Ask a question about your documents..." onkeydown="if(event.key==='Enter') sendQuestion()">
+                <button class="btn btn-primary" onclick="sendQuestion()">Ask</button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        let selectedFiles = [];
+
+        function handleFileSelected(input) {
+            selectedFiles = Array.from(input.files);
+            const listDiv = document.getElementById('fileList');
+            if (selectedFiles.length > 0) {
+                listDiv.innerText = selectedFiles.map(f => f.name).join(', ');
+            } else {
+                listDiv.innerText = '';
+            }
+        }
+
+        async function updateStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const data = await res.json();
+                document.getElementById('docCount').innerText = data.total_sources || 0;
+                document.getElementById('chunkCount').innerText = data.total_chunks || 0;
+                document.getElementById('statusBadge').innerText = data.total_chunks > 0 ? "Status: Ready" : "Status: No Documents";
+            } catch(e) {}
+        }
+
+        async function loadSample() {
+            const key = document.getElementById('apiKey').value;
+            const formData = new FormData();
+            if (key) formData.append('api_key', key);
+            
+            appendAssistantMsg("Indexing sample MCA syllabus...");
+            try {
+                const res = await fetch('/api/load-sample', { method: 'POST', body: formData });
+                const data = await res.json();
+                appendAssistantMsg(`Sample syllabus indexed successfully (${data.indexed_chunks} chunks). You can now ask questions!`);
+                updateStats();
+            } catch (err) {
+                appendAssistantMsg("Error indexing sample syllabus: " + err.message);
+            }
+        }
+
+        async function indexFiles() {
+            if (selectedFiles.length === 0) {
+                alert("Please select files first.");
+                return;
+            }
+            const key = document.getElementById('apiKey').value;
+            const formData = new FormData();
+            selectedFiles.forEach(f => formData.append('files', f));
+            if (key) formData.append('api_key', key);
+
+            appendAssistantMsg(`Indexing ${selectedFiles.length} file(s)...`);
+            try {
+                const res = await fetch('/api/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                appendAssistantMsg(`Successfully indexed ${data.indexed_chunks} chunks from ${selectedFiles.length} file(s).`);
+                selectedFiles = [];
+                document.getElementById('fileList').innerText = '';
+                updateStats();
+            } catch (err) {
+                appendAssistantMsg("Error indexing files: " + err.message);
+            }
+        }
+
+        async function clearDocs() {
+            await fetch('/api/clear', { method: 'POST' });
+            appendAssistantMsg("All documents cleared from memory.");
+            updateStats();
+        }
+
+        function askSuggestion(text) {
+            document.getElementById('userInput').value = text;
+            sendQuestion();
+        }
+
+        function appendUserMsg(text) {
+            const chat = document.getElementById('chatContainer');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message user';
+            msgDiv.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+            chat.appendChild(msgDiv);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function appendAssistantMsg(text, citations) {
+            const chat = document.getElementById('chatContainer');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message assistant';
+            
+            let html = `<div class="bubble">${escapeHtml(text).replace(/\\n/g, '<br>')}</div>`;
+            if (citations && citations.length > 0) {
+                html += '<div class="citations">';
+                citations.forEach(c => {
+                    html += `
+                    <div class="citation-box">
+                        <div class="citation-tags">
+                            <span class="tag-mono">📄 ${c.source_file}</span>
+                            <span class="tag-border">Page ${c.page_number}</span>
+                            <span class="tag-border">Match: ${c.match_percent}%</span>
+                        </div>
+                        <div>"${escapeHtml(c.text)}"</div>
+                    </div>`;
+                });
+                html += '</div>';
+            }
+            msgDiv.innerHTML = html;
+            chat.appendChild(msgDiv);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        async function sendQuestion() {
+            const input = document.getElementById('userInput');
+            const question = input.value.trim();
+            if (!question) return;
+
+            input.value = '';
+            appendUserMsg(question);
+
+            const key = document.getElementById('apiKey').value;
+            try {
+                const res = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question, api_key: key || null })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    appendAssistantMsg(data.detail || "An error occurred.");
+                } else {
+                    appendAssistantMsg(data.answer, data.citations);
+                }
+            } catch (err) {
+                appendAssistantMsg("Request error: " + err.message);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.innerText = text;
+            return div.innerHTML;
+        }
+
+        updateStats();
+    </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html_content)
