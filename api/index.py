@@ -112,6 +112,61 @@ def load_sample(api_key: Optional[str] = Form(None), session_id: Optional[str] =
     return {"status": "success", "indexed_chunks": count, "file": "MCA_Semester_1_Syllabus.txt", "session_id": sid}
 
 
+import base64
+
+
+class FileUploadItem(BaseModel):
+    name: str
+    data: str  # Base64 string or raw text
+
+
+class JsonUploadRequest(BaseModel):
+    files: List[FileUploadItem]
+    api_key: Optional[str] = None
+    session_id: Optional[str] = DEFAULT_SESSION
+
+
+@app.post("/upload-json")
+@app.post("/api/upload-json")
+def upload_json_documents(req: JsonUploadRequest):
+    if req.api_key and req.api_key.strip():
+        rag_engine.set_api_key(req.api_key.strip())
+
+    all_chunks = []
+    processed_files = []
+    sid = req.session_id or DEFAULT_SESSION
+
+    for f in req.files:
+        try:
+            # Decode base64 if data URL or base64 encoded
+            raw_data = f.data
+            if "," in raw_data:
+                raw_data = raw_data.split(",", 1)[1]
+            try:
+                file_bytes = BytesIO(base64.b64decode(raw_data))
+            except Exception:
+                file_bytes = BytesIO(f.data.encode("utf-8", errors="replace"))
+
+            pages = load_document(file_bytes, f.name)
+            chunks = chunk_document_pages(pages, chunk_size=700, chunk_overlap=150)
+            all_chunks.extend(chunks)
+            processed_files.append({"filename": f.name, "pages": len(pages), "chunks": len(chunks)})
+        except Exception as e:
+            print(f"Error processing file {f.name}: {e}")
+
+    if all_chunks:
+        count = rag_engine.index_chunks(all_chunks, session_id=sid)
+        try:
+            create_or_update_session(sid)
+            for item in processed_files:
+                save_document_meta(sid, item["filename"], item["pages"], item["chunks"])
+        except Exception:
+            pass
+        return {"status": "success", "indexed_chunks": count, "files": processed_files, "session_id": sid}
+
+    return {"status": "no_text", "detail": "No readable text found in uploaded files."}
+
+
 @app.post("/upload")
 @app.post("/api/upload")
 async def upload_documents(
@@ -145,6 +200,7 @@ async def upload_documents(
         return {"status": "success", "indexed_chunks": count, "files": processed_files, "session_id": sid}
 
     return {"status": "no_text", "detail": "No readable text found in uploaded files."}
+
 
 
 @app.post("/query")

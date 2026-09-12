@@ -709,31 +709,68 @@
             }
         }
 
+        async function readFileAsBase64(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve({ name: file.name, data: reader.result });
+                reader.onerror = (err) => reject(err);
+                reader.readAsDataURL(file);
+            });
+        }
+
         async function indexFiles() {
             if (selectedFiles.length === 0) {
                 alert("Please select or drop files first using 'Choose / Browse Files'.");
                 return;
             }
+
+            // Check total size
+            const totalBytes = selectedFiles.reduce((acc, f) => acc + f.size, 0);
+            if (totalBytes > 4.5 * 1024 * 1024) {
+                alert("Total file size exceeds 4.5 MB serverless limit. Please upload smaller files or one document at a time.");
+                return;
+            }
+
             const btn = document.getElementById('uploadBtn');
             const pbox = document.getElementById('progressBox');
             const ptext = document.getElementById('progressText');
             btn.disabled = true;
             pbox.style.display = 'block';
-            ptext.innerText = `Uploading and indexing ${selectedFiles.length} file(s)...`;
+            ptext.innerText = `Reading ${selectedFiles.length} file(s)...`;
 
-            const key = document.getElementById('apiKey').value;
-            const formData = new FormData();
-            selectedFiles.forEach(f => formData.append('files', f));
-            if (key) formData.append('api_key', key);
+            appendAssistantMsg(`Reading and uploading ${selectedFiles.length} file(s)...`);
 
-            appendAssistantMsg(`Indexing ${selectedFiles.length} file(s)...`);
             try {
-                const res = await fetch('/api/upload', { method: 'POST', body: formData });
-                const data = await res.json();
+                // Convert files to Base64 payloads
+                const base64Files = await Promise.all(selectedFiles.map(f => readFileAsBase64(f)));
+                ptext.innerText = `Uploading and generating embeddings...`;
+
+                const key = document.getElementById('apiKey').value;
+                const res = await fetch('/api/upload-json', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        files: base64Files,
+                        api_key: key || null
+                    })
+                });
+
+                const rawText = await res.text();
+                let data;
+                try {
+                    data = JSON.parse(rawText);
+                } catch(e) {
+                    throw new Error(rawText.substring(0, 120) || "Server returned non-JSON response.");
+                }
+
+                if (!res.ok) {
+                    throw new Error(data.detail || `Upload failed with status ${res.status}`);
+                }
+
                 if (data.files) {
                     loadedDocs = data.files.map(f => ({ name: f.filename, pages: f.pages, chunks: f.chunks }));
                 }
-                appendAssistantMsg(`✓ Successfully indexed ${data.indexed_chunks} chunks from ${selectedFiles.length} file(s).`);
+                appendAssistantMsg(`✓ Successfully indexed ${data.indexed_chunks} chunks across ${selectedFiles.length} file(s). You can now ask questions!`);
                 selectedFiles = [];
                 updateSelectedFilesUI();
                 updateStats();
@@ -744,6 +781,7 @@
                 pbox.style.display = 'none';
             }
         }
+
 
         async function clearDocs() {
             await fetch('/api/clear', { method: 'POST' });

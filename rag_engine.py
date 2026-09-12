@@ -171,18 +171,35 @@ class RAGEngine:
 
         config = types.GenerateContentConfig(
             system_instruction=system_instruction,
-            temperature=0.2,  # Low temperature for strict adherence and accuracy
+            temperature=0.2,
         )
 
-        response_stream = self.client.models.generate_content_stream(
-            model=model_name,
-            contents=user_prompt,
-            config=config,
-        )
+        candidate_models = [model_name, "gemini-2.5-flash", "gemini-1.5-flash"]
+        # Remove duplicates while preserving order
+        unique_models = []
+        for m in candidate_models:
+            if m not in unique_models:
+                unique_models.append(m)
 
-        for chunk in response_stream:
-            if chunk.text:
-                yield chunk.text
+        last_error = None
+        for candidate in unique_models:
+            try:
+                response_stream = self.client.models.generate_content_stream(
+                    model=candidate,
+                    contents=user_prompt,
+                    config=config,
+                )
+                for chunk in response_stream:
+                    if chunk.text:
+                        yield chunk.text
+                return
+            except Exception as e:
+                last_error = e
+                continue
+
+        if last_error:
+            yield f"Error generating answer: {str(last_error)}"
+
 
     def clear_index(self):
         """Clear all stored documents from memory."""
