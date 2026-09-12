@@ -1,0 +1,80 @@
+MASTER OF COMPUTER APPLICATIONS (MCA) - CURRICULUM & SYLLABUS
+SEMESTER 1 OVERVIEW & COURSE DETAILS
+
+Department of Computer Science & Applications
+Academic Year: 2026-2027
+
+================================================================================
+1. SEMESTER 1 COURSE STRUCTURE & SUBJECTS
+================================================================================
+Course Code | Subject Title                             | Credits | Category
+--------------------------------------------------------------------------------
+MCA101      | Mathematical Foundations of Computer Sci. | 4       | Core Theory
+MCA102      | Advanced Data Structures and Algorithms   | 4       | Core Theory
+MCA103      | Modern Database Management Systems (DBMS) | 4       | Core Theory
+MCA104      | Operating Systems & Cloud Virtualization  | 4       | Core Theory
+MCA105      | Python for Software & AI Engineering      | 3       | Core Theory
+MCA106P     | Data Structures & Algorithms Lab          | 2       | Practical
+MCA107P     | Python & DBMS Development Lab             | 2       | Practical
+MCA108S     | Technical Communication & Seminar         | 1       | Soft Skills
+--------------------------------------------------------------------------------
+Total Credits for Semester 1: 24 Credits
+
+================================================================================
+2. DETAILED SYLLABUS: MCA102 - ADVANCED DATA STRUCTURES AND ALGORITHMS
+================================================================================
+Course Objective:
+To master fundamental and advanced data structures, analyze algorithmic complexity, 
+and implement graph algorithms, dynamic programming, and greedy heuristics.
+
+UNIT 1: Linear Data Structures & Complexity Analysis
+- Asymptotic Notations: Big-O, Omega, Theta. Amortized time analysis.
+- Advanced Linked Lists: Skip Lists, Unrolled Linked Lists, and XOR Linked Lists.
+- Multi-dimensional Arrays, Sparse Matrix representations and operations.
+- Stack applications: Expression conversion (Infix, Postfix, Prefix), Monotonic Stacks.
+- Deque and Priority Queues: Implementation and use-cases.
+
+UNIT 2: Trees and Balanced Search Trees
+- Binary Trees: Representation, Traversals (Pre-order, In-order, Post-order, Level-order).
+- Binary Search Trees (BST): Insertion, Deletion, and Search operations.
+- Self-Balancing Trees: AVL Trees (Single and Double Rotations), Red-Black Trees (Properties and Insertion).
+- Multi-way Search Trees: B-Trees, B+ Trees (Node splitting, merging, indexing mechanisms).
+- Heaps: Min-Heap, Max-Heap, Binomial Heaps, and Fibonacci Heaps.
+
+UNIT 3: Graph Algorithms and Network Flow
+- Graph Representations: Adjacency Matrix, Adjacency List, Compressed Sparse Row (CSR).
+- Graph Traversals: Depth First Search (DFS), Breadth First Search (BFS), and Topological Sort.
+- Minimum Spanning Trees: Kruskal's algorithm (Disjoint Set Union) and Prim's algorithm.
+- Shortest Path Algorithms: Dijkstra's Single-Source Shortest Path, Bellman-Ford (negative weight detection), Floyd-Warshall (all-pairs).
+- Network Flow: Ford-Fulkerson method, Edmonds-Karp algorithm, Max-Flow Min-Cut Theorem.
+
+UNIT 4: Algorithmic Paradigms & Dynamic Programming
+- Divide and Conquer: Strassen's Matrix Multiplication, Closest Pair of Points.
+- Greedy Approach: Fractional Knapsack, Huffman Coding, Activity Selection.
+- Dynamic Programming: Longest Common Subsequence (LCS), 0/1 Knapsack, Matrix Chain Multiplication, Traveling Salesperson Problem (TSP).
+- Backtracking: N-Queens problem, Subset Sum problem, Graph Coloring.
+
+UNIT 5: Advanced Topics & Computational Complexity
+- String Matching Algorithms: Knuth-Morris-Pratt (KMP), Rabin-Karp, Boyer-Moore, Aho-Corasick.
+- Trie and Suffix Trees for pattern matching.
+- Complexity Classes: P, NP, NP-Complete, and NP-Hard.
+- Reductions: 3-SAT to Clique, Vertex Cover to Set Cover.
+
+================================================================================
+3. EXAMINATION SCHEME & EVALUATION
+================================================================================
+- Continuous Internal Assessment (CIA): 40 Marks
+  * Mid-term Test: 20 Marks
+  * Assignments / Quizzes: 10 Marks
+  * Lab / Practical Assessments: 10 Marks
+- End Semester University Examination (ESE): 60 Marks
+  * Section A: 10 Objective/Short questions (10 x 2 = 20 Marks)
+  * Section B: 5 Analytical / Descriptive questions with internal choice (5 x 8 = 40 Marks)
+- Passing Criteria: Minimum 40% in ESE and 50% aggregate (CIA + ESE).
+
+================================================================================
+4. RECOMMENDED TEXTBOOKS & REFERENCES
+================================================================================
+1. Thomas H. Cormen, Charles E. Leiserson, Ronald L. Rivest, Clifford Stein, "Introduction to Algorithms", 4th Edition, MIT Press.
+2. Ellis Horowitz, Sartaj Sahni, Sanguthevar Rajasekaran, "Fundamentals of Computer Algorithms", 2nd Edition, Silicon Press.
+3. Mark Allen Weiss, "Data Structures and Algorithm Analysis in C++ / Java", 4th Edition, Pearson.
