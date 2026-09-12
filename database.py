@@ -58,6 +58,57 @@ def sessions_collection() -> Collection:
     return get_db()["sessions"]
 
 
+def chunks_collection() -> Collection:
+    return get_db()["document_chunks"]
+
+
+# ─── Chunk & Vector Storage ───────────────────────────────────────────────────
+
+def save_chunks_to_db(session_id: str, chunks: list, embeddings: list) -> int:
+    """Persist document chunks and their embedding vectors to MongoDB."""
+    if not chunks or not embeddings or len(chunks) != len(embeddings):
+        return 0
+
+    docs = []
+    for chunk, emb in zip(chunks, embeddings):
+        docs.append({
+            "session_id": session_id,
+            "chunk_id": chunk.chunk_id if hasattr(chunk, "chunk_id") else chunk["chunk_id"],
+            "source_file": chunk.source_file if hasattr(chunk, "source_file") else chunk["source_file"],
+            "page_number": chunk.page_number if hasattr(chunk, "page_number") else chunk["page_number"],
+            "text": chunk.text if hasattr(chunk, "text") else chunk["text"],
+            "embedding": emb,
+            "created_at": datetime.now(timezone.utc),
+        })
+
+    result = chunks_collection().insert_many(docs)
+    return len(result.inserted_ids)
+
+
+def load_chunks_from_db(session_id: str):
+    """Load all chunks and vectors for a given session from MongoDB."""
+    from document_loader import DocumentChunk
+    cursor = chunks_collection().find({"session_id": session_id})
+    chunks = []
+    embeddings = []
+    for doc in cursor:
+        chunks.append(DocumentChunk(
+            chunk_id=doc["chunk_id"],
+            source_file=doc["source_file"],
+            page_number=doc["page_number"],
+            text=doc["text"],
+        ))
+        embeddings.append(doc["embedding"])
+    return chunks, embeddings
+
+
+def delete_chunks_for_session(session_id: str) -> int:
+    """Delete all chunks and vectors for a session."""
+    result = chunks_collection().delete_many({"session_id": session_id})
+    return result.deleted_count
+
+
+
 # ─── Chat History ──────────────────────────────────────────────────────────────
 
 def save_message(session_id: str, role: str, content: str, citations: Optional[List[Dict]] = None) -> str:

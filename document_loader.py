@@ -81,21 +81,34 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-def load_document(file_input: Union[str, BinaryIO, BytesIO], filename: str) -> List[dict]:
+def load_document(file_input: Union[str, BinaryIO, BytesIO, bytes], filename: str) -> List[dict]:
     """
-    Auto-detect format by filename extension and extract pages.
+    Auto-detect format by filename extension and extract pages safely.
     Returns list of {"source_file": ..., "page_number": ..., "text": ...}
     """
+    # Safely convert to BytesIO if bytes or UploadedFile with getvalue
+    if hasattr(file_input, "getvalue"):
+        file_input = BytesIO(file_input.getvalue())
+    elif isinstance(file_input, bytes):
+        file_input = BytesIO(file_input)
+    elif hasattr(file_input, "seek") and hasattr(file_input, "read") and not isinstance(file_input, str):
+        # Reset pointer if seekable
+        try:
+            file_input.seek(0)
+        except Exception:
+            pass
+
     ext = os.path.splitext(filename)[1].lower()
     if ext == ".pdf":
         return extract_pages_from_pdf(file_input, filename)
     elif ext in [".docx", ".doc"]:
         return extract_pages_from_docx(file_input, filename)
-    elif ext in [".txt", ".md", ".csv", ".json"]:
+    elif ext in [".txt", ".md", ".csv", ".json", ".py", ".js", ".html", ".log", ".rtf"]:
         return extract_pages_from_txt(file_input, filename)
     else:
         # Fallback to text
         return extract_pages_from_txt(file_input, filename)
+
 
 
 def split_text_into_chunks(text: str, chunk_size: int = 700, chunk_overlap: int = 150) -> List[str]:

@@ -10,7 +10,7 @@
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
         body { background: #FFFFFF; color: #111111; display: flex; height: 100vh; overflow: hidden; }
 
-        /* Sidebar (Matching Streamlit Left Panel) */
+        /* Sidebar */
         aside {
             width: 320px;
             border-right: 1px solid #E5E5E5;
@@ -48,13 +48,16 @@
         .dropzone {
             border: 2px dashed #D4D4D4;
             border-radius: 8px;
-            padding: 20px 14px;
+            padding: 22px 14px;
             text-align: center;
             background: #FFFFFF;
             cursor: pointer;
-            transition: border-color 0.15s;
+            transition: all 0.15s ease;
         }
-        .dropzone:hover { border-color: #000000; }
+        .dropzone.dragover {
+            border-color: #000000;
+            background: #F4F4F5;
+        }
         
         .btn {
             padding: 9px 14px;
@@ -65,19 +68,23 @@
             transition: all 0.15s;
             text-align: center;
         }
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
         .btn-primary {
             background-color: #000000;
             color: #FFFFFF;
             border: 1px solid #000000;
         }
-        .btn-primary:hover { background-color: #262626; border-color: #262626; }
+        .btn-primary:hover:not(:disabled) { background-color: #262626; border-color: #262626; }
         
         .btn-secondary {
             background-color: #FFFFFF;
             color: #111111;
             border: 1px solid #E5E5E5;
         }
-        .btn-secondary:hover { background-color: #F5F5F5; border-color: #D4D4D4; color: #000000; }
+        .btn-secondary:hover:not(:disabled) { background-color: #F5F5F5; border-color: #D4D4D4; color: #000000; }
 
         .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 
@@ -104,7 +111,6 @@
             background: #FFFFFF;
         }
         
-        /* Clean Monochrome Header */
         .dash-header {
             display: flex;
             justify-content: space-between;
@@ -161,7 +167,7 @@
             letter-spacing: -0.5px;
         }
 
-        /* Tabs (Streamlit-style Navigation) */
+        /* Tabs Navigation */
         .tabs-header {
             display: flex;
             border-bottom: 1px solid #E5E5E5;
@@ -240,7 +246,7 @@
             border: 1px solid #E5E5E5;
         }
 
-        /* Citation Card (Matching Streamlit Citation Box) */
+        /* Citation Card */
         .citation-card {
             background: #FAFAFA;
             border: 1px solid #E5E5E5;
@@ -277,7 +283,6 @@
             line-height: 1.5;
         }
 
-        /* Sources Expander */
         details.sources-expander {
             margin-top: 8px;
             cursor: pointer;
@@ -341,15 +346,14 @@
             border-bottom: 1px solid #E5E5E5;
             font-size: 0.9rem;
         }
-        .chunk-preview-box {
+        .chunk-box {
             background: #FAFAFA;
             border: 1px solid #E5E5E5;
             border-radius: 6px;
-            padding: 16px;
+            padding: 14px;
+            margin-bottom: 10px;
             font-size: 0.85rem;
             line-height: 1.5;
-            white-space: pre-wrap;
-            min-height: 120px;
         }
     </style>
 </head>
@@ -359,21 +363,21 @@
         <div class="sidebar-title">Document Manager</div>
         <div>
             <label class="input-label">Gemini API Key</label>
-            <input type="password" id="apiKey" class="input-box" placeholder="Enter API Key...">
+            <input type="password" id="apiKey" class="input-box" placeholder="Configured via environment" autocomplete="off">
         </div>
         <div>
             <label class="input-label">Upload Documents</label>
             <input type="file" id="fileInput" multiple style="display:none;" onchange="handleFileSelected(this)">
-            <div class="dropzone" onclick="document.getElementById('fileInput').click()">
+            <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
                 <div style="font-size: 1.4rem; margin-bottom: 4px;">📄</div>
-                <div style="font-size: 0.82rem; font-weight: 600;">Select Documents</div>
-                <div style="font-size: 0.72rem; color: #737373; margin-top: 2px;">PDF, DOCX, TXT, MD</div>
+                <div style="font-size: 0.82rem; font-weight: 600;">Drag & Drop or Click</div>
+                <div style="font-size: 0.72rem; color: #737373; margin-top: 2px;">PDF, DOCX, TXT, MD, CSV</div>
             </div>
             <div id="fileList" style="font-size: 0.75rem; color: #666666; margin-top: 6px;"></div>
         </div>
         <div class="btn-group">
-            <button class="btn btn-primary" onclick="indexFiles()">Index Files</button>
-            <button class="btn btn-secondary" onclick="loadSample()">Sample</button>
+            <button class="btn btn-primary" id="indexBtn" onclick="indexFiles()">Index Files</button>
+            <button class="btn btn-secondary" id="sampleBtn" onclick="loadSample()">Sample</button>
         </div>
 
         <div id="activeFilesSection" class="active-files-box" style="display: none;">
@@ -388,7 +392,6 @@
 
     <!-- MAIN DASHBOARD -->
     <main>
-        <!-- Header -->
         <div class="dash-header">
             <div>
                 <h1 class="dash-title">Document Question Answering</h1>
@@ -397,7 +400,6 @@
             <div class="dash-status" id="statusBadge">Status: Ready</div>
         </div>
 
-        <!-- Metrics Ribbon -->
         <div class="metric-grid">
             <div class="metric-card">
                 <div class="metric-label">Documents</div>
@@ -413,20 +415,18 @@
             </div>
         </div>
 
-        <!-- Tabs Navigation -->
         <div class="tabs-header">
             <button class="tab-btn active" onclick="switchTab('tab-qa', this)">Question & Answer</button>
             <button class="tab-btn" onclick="switchTab('tab-docs', this)">Documents</button>
         </div>
 
-        <!-- Tab Panes -->
         <div class="tab-content">
             <!-- TAB 1: Q&A -->
             <div id="tab-qa" class="tab-pane active">
                 <div class="chat-container" id="chatContainer">
                     <div class="message assistant">
                         <div class="bubble">
-                            Upload documents or click <strong>Sample</strong> in the sidebar to begin.
+                            Upload documents or click <strong>Sample</strong> in the sidebar to begin asking questions.
                         </div>
                     </div>
                 </div>
@@ -439,7 +439,7 @@
                     </div>
                     <div class="input-row">
                         <input type="text" id="userInput" class="chat-input" placeholder="Ask a question about your documents..." onkeydown="if(event.key==='Enter') sendQuestion()">
-                        <button class="btn btn-primary" onclick="sendQuestion()">Ask</button>
+                        <button class="btn btn-primary" id="askBtn" onclick="sendQuestion()">Ask</button>
                     </div>
                 </div>
             </div>
@@ -450,6 +450,11 @@
                 <div id="docsTable">
                     <p style="color: #666666; font-size: 0.88rem;">No documents uploaded yet.</p>
                 </div>
+
+                <h3 style="font-size: 1.1rem; font-weight: 700; margin-top: 16px;">Extracted Chunk Previews</h3>
+                <div id="chunksTable">
+                    <p style="color: #666666; font-size: 0.88rem;">No indexed chunks available.</p>
+                </div>
             </div>
         </div>
     </main>
@@ -458,20 +463,51 @@
         let selectedFiles = [];
         let loadedDocs = [];
 
+        // Drag and drop setup
+        const dropzone = document.getElementById('dropzone');
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.add('dragover');
+            }, false);
+        });
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropzone.classList.remove('dragover');
+            }, false);
+        });
+        dropzone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            if (dt && dt.files && dt.files.length > 0) {
+                selectedFiles = Array.from(dt.files);
+                updateFileListUI();
+            }
+        });
+
+        function handleFileSelected(input) {
+            selectedFiles = Array.from(input.files);
+            updateFileListUI();
+        }
+
+        function updateFileListUI() {
+            const listDiv = document.getElementById('fileList');
+            if (selectedFiles.length > 0) {
+                listDiv.innerText = selectedFiles.map(f => `${f.name} (${(f.size/1024).toFixed(1)} KB)`).join(', ');
+            } else {
+                listDiv.innerText = '';
+            }
+        }
+
         function switchTab(tabId, btn) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
             btn.classList.add('active');
             document.getElementById(tabId).classList.add('active');
-        }
-
-        function handleFileSelected(input) {
-            selectedFiles = Array.from(input.files);
-            const listDiv = document.getElementById('fileList');
-            if (selectedFiles.length > 0) {
-                listDiv.innerText = selectedFiles.map(f => f.name).join(', ');
-            } else {
-                listDiv.innerText = '';
+            if (tabId === 'tab-docs') {
+                fetchChunksPreview();
             }
         }
 
@@ -483,15 +519,22 @@
                 document.getElementById('chunkCount').innerText = data.total_chunks || 0;
                 document.getElementById('statusBadge').innerText = data.total_chunks > 0 ? "Status: Ready" : "Status: No Documents";
                 
-                // Update documents tab
-                renderDocsTab(data);
+                renderDocsTab();
             } catch(e) {}
         }
 
-        function renderDocsTab(statsData) {
+        async function renderDocsTab() {
             const container = document.getElementById('docsTable');
             const activeSection = document.getElementById('activeFilesSection');
             const activeList = document.getElementById('activeFilesList');
+
+            try {
+                const res = await fetch('/api/documents');
+                const data = await res.json();
+                if (data.documents && data.documents.length > 0) {
+                    loadedDocs = data.documents;
+                }
+            } catch(e) {}
 
             if (loadedDocs.length === 0) {
                 container.innerHTML = '<p style="color: #666666; font-size: 0.88rem;">No documents uploaded yet.</p>';
@@ -500,13 +543,13 @@
             }
 
             activeSection.style.display = 'block';
-            activeList.innerHTML = loadedDocs.map(d => `<div class="active-file-item"><strong>• ${escapeHtml(d.name)}</strong><span style="color:#737373; font-size:0.75rem;">(${d.chunks} chunks, ${d.pages} pages)</span></div>`).join('');
+            activeList.innerHTML = loadedDocs.map(d => `<div class="active-file-item"><strong>• ${escapeHtml(d.filename || d.name)}</strong><span style="color:#737373; font-size:0.75rem;">(${d.chunks} chunks, ${d.pages} pages)</span></div>`).join('');
 
             let html = '';
             loadedDocs.forEach(d => {
                 html += `
                 <div class="doc-item">
-                    <div><strong>📄 ${escapeHtml(d.name)}</strong></div>
+                    <div><strong>📄 ${escapeHtml(d.filename || d.name)}</strong></div>
                     <div style="color: #666666;">Pages: ${d.pages}</div>
                     <div style="color: #666666;">Chunks: ${d.chunks}</div>
                 </div>`;
@@ -514,7 +557,31 @@
             container.innerHTML = html;
         }
 
+        async function fetchChunksPreview() {
+            const chunksDiv = document.getElementById('chunksTable');
+            try {
+                const res = await fetch('/api/chunks');
+                const data = await res.json();
+                if (data.chunks && data.chunks.length > 0) {
+                    chunksDiv.innerHTML = data.chunks.map(c => `
+                        <div class="chunk-box">
+                            <div style="font-weight:600; font-size:0.75rem; color:#737373; margin-bottom:4px;">
+                                ${escapeHtml(c.source_file)} (Page ${c.page_number})
+                            </div>
+                            <div>"${escapeHtml(c.text)}"</div>
+                        </div>
+                    `).join('');
+                } else {
+                    chunksDiv.innerHTML = '<p style="color: #666666; font-size: 0.88rem;">No indexed chunks available.</p>';
+                }
+            } catch(e) {}
+        }
+
         async function loadSample() {
+            const btn = document.getElementById('sampleBtn');
+            btn.disabled = true;
+            btn.innerText = "Indexing...";
+            
             const key = document.getElementById('apiKey').value;
             const formData = new FormData();
             if (key) formData.append('api_key', key);
@@ -528,6 +595,9 @@
                 updateStats();
             } catch (err) {
                 appendAssistantMsg("Error indexing sample syllabus: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Sample";
             }
         }
 
@@ -536,6 +606,10 @@
                 alert("Please select files first.");
                 return;
             }
+            const btn = document.getElementById('indexBtn');
+            btn.disabled = true;
+            btn.innerText = "Indexing...";
+
             const key = document.getElementById('apiKey').value;
             const formData = new FormData();
             selectedFiles.forEach(f => formData.append('files', f));
@@ -548,12 +622,15 @@
                 if (data.files) {
                     loadedDocs = data.files.map(f => ({ name: f.filename, pages: f.pages, chunks: f.chunks }));
                 }
-                appendAssistantMsg(`Successfully indexed ${data.indexed_chunks} chunks.`);
+                appendAssistantMsg(`Successfully indexed ${data.indexed_chunks} chunks from ${selectedFiles.length} file(s).`);
                 selectedFiles = [];
                 document.getElementById('fileList').innerText = '';
                 updateStats();
             } catch (err) {
                 appendAssistantMsg("Error indexing files: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Index Files";
             }
         }
 
@@ -583,10 +660,15 @@
             const msgDiv = document.createElement('div');
             msgDiv.className = 'message assistant';
             
-            let html = `<div class="bubble">${escapeHtml(text).replace(/\\n/g, '<br>')}</div>`;
+            let formattedText = escapeHtml(text)
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.*?)\*/g, '<em>$1</em>');
+
+            let html = `<div class="bubble">${formattedText}</div>`;
             if (citations && citations.length > 0) {
                 html += `
-                <details class="sources-expander">
+                <details class="sources-expander" open>
                     <summary>Sources (${citations.length} citations)</summary>
                     <div>`;
                 citations.forEach(c => {
@@ -611,10 +693,13 @@
 
         async function sendQuestion() {
             const input = document.getElementById('userInput');
+            const btn = document.getElementById('askBtn');
             const question = input.value.trim();
             if (!question) return;
 
             input.value = '';
+            btn.disabled = true;
+            btn.innerText = 'Searching...';
             appendUserMsg(question);
 
             const key = document.getElementById('apiKey').value;
@@ -632,6 +717,9 @@
                 }
             } catch (err) {
                 appendAssistantMsg("Request error: " + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Ask';
             }
         }
 

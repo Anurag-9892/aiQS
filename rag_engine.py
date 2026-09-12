@@ -11,6 +11,9 @@ from document_loader import DocumentChunk
 from vector_store import VectorStore
 
 
+from dotenv import load_dotenv
+load_dotenv()
+
 DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
 DEFAULT_LLM_MODEL = "gemini-3.7-flash"
 
@@ -18,9 +21,11 @@ DEFAULT_LLM_MODEL = "gemini-3.7-flash"
 
 class RAGEngine:
     def __init__(self, api_key: Optional[str] = None):
+        load_dotenv()
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.vector_store = VectorStore()
+
 
     def set_api_key(self, api_key: str):
         """Update or set Gemini API key dynamically."""
@@ -72,10 +77,10 @@ class RAGEngine:
         else:
             raise RuntimeError(f"Unexpected response format from embedding API: {response}")
 
-    def index_chunks(self, chunks: List[DocumentChunk]) -> int:
+    def index_chunks(self, chunks: List[DocumentChunk], session_id: Optional[str] = None) -> int:
         """
-        Generate embeddings for document chunks and add them to the vector store.
-        Returns the number of indexed chunks.
+        Generate embeddings for document chunks, add them to vector store,
+        and optionally persist to MongoDB.
         """
         if not chunks:
             return 0
@@ -83,17 +88,41 @@ class RAGEngine:
         texts = [chunk.text for chunk in chunks]
         embeddings = self.embed_texts(texts)
         self.vector_store.add_chunks(chunks, embeddings)
+
+        if session_id:
+            try:
+                from database import save_chunks_to_db
+                save_chunks_to_db(session_id, chunks, embeddings)
+            except Exception:
+                pass
+
         return len(chunks)
 
-    def retrieve_context(self, question: str, top_k: int = 4) -> List[Tuple[DocumentChunk, float]]:
+    def ensure_loaded(self, session_id: str) -> None:
+        """Load stored chunks from MongoDB if in-memory store is empty (serverless recovery)."""
+        if not self.vector_store.chunks and session_id:
+            try:
+                from database import load_chunks_from_db
+                chunks, embeddings = load_chunks_from_db(session_id)
+                if chunks and embeddings:
+                    self.vector_store.add_chunks(chunks, embeddings)
+            except Exception:
+                pass
+
+    def retrieve_context(self, question: str, top_k: int = 4, session_id: Optional[str] = None) -> List[Tuple[DocumentChunk, float]]:
         """
         Retrieve top-k relevant document chunks for the user's question.
+        Automatically checks MongoDB if in-memory store is empty.
         """
+        if session_id:
+            self.ensure_loaded(session_id)
+
         if not self.vector_store.chunks:
             return []
 
         query_vector = self.embed_query(query=question)
         return self.vector_store.similarity_search(query_embedding=query_vector, top_k=top_k)
+
 
     def generate_grounded_response_stream(
         self,

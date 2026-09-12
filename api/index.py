@@ -99,17 +99,17 @@ def load_sample(api_key: Optional[str] = Form(None), session_id: Optional[str] =
 
     pages = load_document(sample_path, "MCA_Semester_1_Syllabus.txt")
     chunks = chunk_document_pages(pages, chunk_size=700, chunk_overlap=150)
-    count = rag_engine.index_chunks(chunks)
+    sid = session_id or DEFAULT_SESSION
+    count = rag_engine.index_chunks(chunks, session_id=sid)
 
     # Persist document metadata to MongoDB
     try:
-        sid = session_id or DEFAULT_SESSION
         create_or_update_session(sid)
         save_document_meta(sid, "MCA_Semester_1_Syllabus.txt", len(pages), count)
     except Exception:
-        pass  # DB unavailable — continue gracefully
+        pass
 
-    return {"status": "success", "indexed_chunks": count, "file": "MCA_Semester_1_Syllabus.txt"}
+    return {"status": "success", "indexed_chunks": count, "file": "MCA_Semester_1_Syllabus.txt", "session_id": sid}
 
 
 @app.post("/upload")
@@ -135,15 +135,14 @@ async def upload_documents(
         processed_files.append({"filename": file.filename, "pages": len(pages), "chunks": len(chunks)})
 
     if all_chunks:
-        count = rag_engine.index_chunks(all_chunks)
-        # Persist document metadata to MongoDB
+        count = rag_engine.index_chunks(all_chunks, session_id=sid)
         try:
             create_or_update_session(sid)
             for f in processed_files:
                 save_document_meta(sid, f["filename"], f["pages"], f["chunks"])
         except Exception:
             pass
-        return {"status": "success", "indexed_chunks": count, "files": processed_files}
+        return {"status": "success", "indexed_chunks": count, "files": processed_files, "session_id": sid}
 
     return {"status": "no_text", "detail": "No readable text found in uploaded files."}
 
@@ -157,11 +156,11 @@ def query_documents(req: QueryRequest):
     if not rag_engine.is_configured():
         raise HTTPException(status_code=400, detail="Gemini API Key is not configured.")
 
-    if not rag_engine.vector_store.chunks:
-        raise HTTPException(status_code=400, detail="No documents are currently indexed.")
-
     sid = req.session_id or DEFAULT_SESSION
-    retrieved = rag_engine.retrieve_context(req.question, top_k=4)
+    retrieved = rag_engine.retrieve_context(req.question, top_k=4, session_id=sid)
+
+    if not retrieved:
+        raise HTTPException(status_code=400, detail="No relevant context found. Please index documents first.")
 
     stream = rag_engine.generate_grounded_response_stream(
         question=req.question,
@@ -202,11 +201,44 @@ def clear_index(session_id: Optional[str] = Form(DEFAULT_SESSION)):
     rag_engine.clear_index()
     sid = session_id or DEFAULT_SESSION
     try:
+        from database import delete_chunks_for_session
         delete_chat_history(sid)
         delete_documents_for_session(sid)
+        delete_chunks_for_session(sid)
     except Exception:
         pass
     return {"status": "cleared", "session_id": sid}
+
+
+@app.get("/documents")
+@app.get("/api/documents")
+def list_documents(session_id: str = DEFAULT_SESSION):
+    """List all indexed documents for a session."""
+    rag_engine.ensure_loaded(session_id)
+    try:
+        docs = get_documents_for_session(session_id)
+        return {"documents": docs, "count": len(docs)}
+    except Exception:
+        # Fallback to in-memory stats
+        stats = rag_engine.get_stats()
+        return {"documents": [{"filename": s, "pages": "-", "chunks": "-"} for s in stats.get("sources", [])], "count": len(stats.get("sources", []))}
+
+
+@app.get("/chunks")
+@app.get("/api/chunks")
+def list_chunks(session_id: str = DEFAULT_SESSION):
+    """Return top chunks for preview."""
+    rag_engine.ensure_loaded(session_id)
+    chunks_data = []
+    for c in rag_engine.vector_store.chunks[:15]:
+        chunks_data.append({
+            "chunk_id": c.chunk_id,
+            "source_file": c.source_file,
+            "page_number": c.page_number,
+            "text": c.text[:300] + ("..." if len(c.text) > 300 else "")
+        })
+    return {"chunks": chunks_data, "total": len(rag_engine.vector_store.chunks)}
+
 
 
 @app.get("/history")
