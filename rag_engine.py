@@ -22,9 +22,10 @@ DEFAULT_LLM_MODEL = "gemini-3.7-flash"
 class RAGEngine:
     def __init__(self, api_key: Optional[str] = None):
         load_dotenv()
-        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        self.api_key = os.getenv("GEMINI_API_KEY") if api_key is None else api_key
         self.client = genai.Client(api_key=self.api_key) if self.api_key else None
         self.vector_store = VectorStore()
+
 
 
     def set_api_key(self, api_key: str):

@@ -196,15 +196,13 @@ with st.sidebar:
 
     uploaded_files = st.file_uploader(
         "Upload Documents",
-        type=["pdf", "docx", "txt", "md"],
-        accept_multiple_files=True
+        type=["pdf", "docx", "doc", "txt", "md", "csv", "json"],
+        accept_multiple_files=True,
+        help="Upload PDF, Word, or text files to build your knowledge base."
     )
 
-    col1, col2 = st.columns(2)
-    with col1:
-        index_btn = st.button("Index Files", use_container_width=True, type="primary")
-    with col2:
-        sample_btn = st.button("Sample", use_container_width=True)
+    index_btn = st.button("⬆ Upload & Index Files", use_container_width=True, type="primary")
+    sample_btn = st.button("📄 Load Sample Syllabus", use_container_width=True)
 
     # Sample Document Handler
     if sample_btn:
@@ -214,7 +212,7 @@ with st.sidebar:
                 try:
                     pages = load_document(sample_path, "MCA_Semester_1_Syllabus.txt")
                     chunks = chunk_document_pages(pages, chunk_size=700, chunk_overlap=150)
-                    st.session_state.rag_engine.index_chunks(chunks)
+                    st.session_state.rag_engine.index_chunks(chunks, session_id="default")
                     st.session_state.indexed_docs = [{
                         "name": "MCA_Semester_1_Syllabus.txt",
                         "pages": len(pages),
@@ -228,11 +226,11 @@ with st.sidebar:
     # Uploaded Files Handler
     if index_btn:
         if not uploaded_files:
-            st.warning("Select one or more documents.")
+            st.warning("Please browse or drag files first using the box above.")
         elif not st.session_state.rag_engine.is_configured():
             st.error("API key is required.")
         else:
-            with st.spinner("Processing documents..."):
+            with st.spinner(f"Uploading & indexing {len(uploaded_files)} document(s)..."):
                 try:
                     all_chunks = []
                     new_docs = []
@@ -247,9 +245,9 @@ with st.sidebar:
                         })
 
                     if all_chunks:
-                        st.session_state.rag_engine.index_chunks(all_chunks)
+                        count = st.session_state.rag_engine.index_chunks(all_chunks, session_id="default")
                         st.session_state.indexed_docs.extend(new_docs)
-                        st.toast(f"Indexed {len(new_docs)} document(s).", icon="✓")
+                        st.toast(f"Successfully indexed {count} chunks across {len(new_docs)} file(s).", icon="✓")
                         st.rerun()
                     else:
                         st.warning("No readable text found in documents.")
@@ -259,16 +257,24 @@ with st.sidebar:
     # Indexed documents list & Reset
     if st.session_state.indexed_docs:
         st.divider()
-        st.markdown("**Active Files**")
+        st.markdown("**Active Indexed Documents**")
         for d in st.session_state.indexed_docs:
-            st.markdown(f"• **{d['name']}** ({d['chunks']} chunks)")
+            st.markdown(f"• **{d['name']}** ({d['chunks']} chunks, {d['pages']} pgs)")
 
         st.markdown("<div style='height: 8px;'></div>", unsafe_allow_html=True)
-        if st.button("Clear Documents", use_container_width=True):
+        if st.button("Clear All Documents", use_container_width=True):
             st.session_state.rag_engine.clear_index()
             st.session_state.chat_history = []
             st.session_state.indexed_docs = []
+            try:
+                from database import delete_chat_history, delete_documents_for_session, delete_chunks_for_session
+                delete_chat_history("default")
+                delete_documents_for_session("default")
+                delete_chunks_for_session("default")
+            except Exception:
+                pass
             st.rerun()
+
 
 
 # ==============================================================================
