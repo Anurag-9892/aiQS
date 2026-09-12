@@ -18,6 +18,16 @@ from pydantic import BaseModel
 
 from document_loader import load_document, chunk_document_pages
 from rag_engine import RAGEngine, DEFAULT_LLM_MODEL
+from database import (
+    ping as db_ping,
+    save_message,
+    get_chat_history,
+    delete_chat_history,
+    save_document_meta,
+    get_documents_for_session,
+    delete_documents_for_session,
+    create_or_update_session,
+)
 
 app = FastAPI(title="aiQS API", version="1.0.0")
 
@@ -42,27 +52,40 @@ app.add_middleware(
 # Global in-memory RAG engine instance
 rag_engine = RAGEngine()
 
+# Default session ID for serverless (one shared instance)
+DEFAULT_SESSION = "default"
+
 
 class QueryRequest(BaseModel):
     question: str
     api_key: Optional[str] = None
+    session_id: Optional[str] = DEFAULT_SESSION
 
 
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "configured": rag_engine.is_configured()}
+    return {
+        "status": "ok",
+        "configured": rag_engine.is_configured(),
+        "db": "connected" if db_ping() else "unavailable",
+        "database": "aiqs_db",
+    }
+
 
 
 @app.get("/stats")
 @app.get("/api/stats")
 def get_stats():
-    return rag_engine.get_stats()
+    stats = rag_engine.get_stats()
+    stats["db"] = "connected" if db_ping() else "unavailable"
+    stats["database"] = "aiqs_db"
+    return stats
 
 
 @app.post("/load-sample")
 @app.post("/api/load-sample")
-def load_sample(api_key: Optional[str] = Form(None)):
+def load_sample(api_key: Optional[str] = Form(None), session_id: Optional[str] = Form(DEFAULT_SESSION)):
     if api_key and api_key.strip():
         rag_engine.set_api_key(api_key.strip())
 
@@ -77,6 +100,15 @@ def load_sample(api_key: Optional[str] = Form(None)):
     pages = load_document(sample_path, "MCA_Semester_1_Syllabus.txt")
     chunks = chunk_document_pages(pages, chunk_size=700, chunk_overlap=150)
     count = rag_engine.index_chunks(chunks)
+
+    # Persist document metadata to MongoDB
+    try:
+        sid = session_id or DEFAULT_SESSION
+        create_or_update_session(sid)
+        save_document_meta(sid, "MCA_Semester_1_Syllabus.txt", len(pages), count)
+    except Exception:
+        pass  # DB unavailable — continue gracefully
+
     return {"status": "success", "indexed_chunks": count, "file": "MCA_Semester_1_Syllabus.txt"}
 
 
@@ -84,13 +116,15 @@ def load_sample(api_key: Optional[str] = Form(None)):
 @app.post("/api/upload")
 async def upload_documents(
     files: List[UploadFile] = File(...),
-    api_key: Optional[str] = Form(None)
+    api_key: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(DEFAULT_SESSION)
 ):
     if api_key and api_key.strip():
         rag_engine.set_api_key(api_key.strip())
 
     all_chunks = []
     processed_files = []
+    sid = session_id or DEFAULT_SESSION
 
     for file in files:
         contents = await file.read()
@@ -102,6 +136,13 @@ async def upload_documents(
 
     if all_chunks:
         count = rag_engine.index_chunks(all_chunks)
+        # Persist document metadata to MongoDB
+        try:
+            create_or_update_session(sid)
+            for f in processed_files:
+                save_document_meta(sid, f["filename"], f["pages"], f["chunks"])
+        except Exception:
+            pass
         return {"status": "success", "indexed_chunks": count, "files": processed_files}
 
     return {"status": "no_text", "detail": "No readable text found in uploaded files."}
@@ -119,10 +160,9 @@ def query_documents(req: QueryRequest):
     if not rag_engine.vector_store.chunks:
         raise HTTPException(status_code=400, detail="No documents are currently indexed.")
 
-    # Retrieve top-4 chunks
+    sid = req.session_id or DEFAULT_SESSION
     retrieved = rag_engine.retrieve_context(req.question, top_k=4)
 
-    # Generate answer
     stream = rag_engine.generate_grounded_response_stream(
         question=req.question,
         retrieved_chunks=retrieved,
@@ -140,18 +180,45 @@ def query_documents(req: QueryRequest):
             "text": chunk.text
         })
 
+    # Persist Q&A to MongoDB chat history
+    try:
+        create_or_update_session(sid)
+        save_message(sid, "user", req.question)
+        save_message(sid, "assistant", answer, citations)
+    except Exception:
+        pass
+
     return {
         "question": req.question,
         "answer": answer,
-        "citations": citations
+        "citations": citations,
+        "session_id": sid,
     }
 
 
 @app.post("/clear")
 @app.post("/api/clear")
-def clear_index():
+def clear_index(session_id: Optional[str] = Form(DEFAULT_SESSION)):
     rag_engine.clear_index()
-    return {"status": "cleared"}
+    sid = session_id or DEFAULT_SESSION
+    try:
+        delete_chat_history(sid)
+        delete_documents_for_session(sid)
+    except Exception:
+        pass
+    return {"status": "cleared", "session_id": sid}
+
+
+@app.get("/history")
+@app.get("/api/history")
+def get_history(session_id: str = DEFAULT_SESSION):
+    """Return persisted chat history from MongoDB for a session."""
+    try:
+        messages = get_chat_history(session_id)
+        return {"session_id": session_id, "messages": messages, "count": len(messages)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB error: {str(e)}")
+
 
 
 
